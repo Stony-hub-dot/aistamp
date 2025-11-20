@@ -1,23 +1,22 @@
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { StampData, Rarity } from "../types";
 
-// The API key is injected by Vite's define plugin at build time.
-// We assume it is valid as per the application setup.
+// Initialize the Google GenAI client
+// We assume API_KEY is available in the environment
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
- * Helpers to extract JSON from markdown code blocks if necessary
+ * Helper to clean up JSON strings returned by the AI
+ * (Removes markdown code blocks if present)
  */
 function cleanJsonString(text: string): string {
-  const match = text.match(/```json\s*([\s\S]*?)\s*```/);
-  if (match) {
-    return match[1];
-  }
-  return text;
+  // Remove ```json and ``` markers
+  let clean = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+  return clean.trim();
 }
 
-// Safety settings to allow historical stamps (wars, flags, leaders, etc.)
-// We use 'BLOCK_NONE' to prevent the AI from refusing to analyze valid philatelic items.
+// Safety settings using Enums to satisfy TypeScript requirements
+// We allow all content to ensure historical stamps (war themes, etc.) are not blocked
 const safetySettings = [
   { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
   { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -26,13 +25,15 @@ const safetySettings = [
 ];
 
 /**
- * Step 1: Analyze the image visually using gemini-2.0-flash-exp
- * This gets the fine details: perforation, cancellation, design details.
+ * Step 1: Analyze the image visually.
+ * We use gemini-3-pro-preview for high-fidelity image understanding.
  */
 async function analyzeImageVisuals(base64Image: string, mimeType: string): Promise<string> {
   try {
+    console.log("Starting Visual Analysis...");
+    
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-3-pro-preview',
       contents: {
         parts: [
           {
@@ -44,15 +45,15 @@ async function analyzeImageVisuals(base64Image: string, mimeType: string): Promi
           {
             text: `Act as a professional expert philatelist. Examine this stamp image in extreme detail. 
             Describe the following visual elements precisely:
-            1. Country of origin (look for text).
+            1. Country of origin (look for text on the stamp).
             2. Denomination/Value.
             3. Central subject (person, event, symbol).
             4. Color(s).
-            5. Perforation condition (imperforate vs perforated).
-            6. Cancellation marks (used vs mint appearance).
-            7. Any overprints or surcharges.
+            5. Perforation condition.
+            6. Cancellation marks (used vs mint).
+            7. Any overprints.
             
-            Provide a detailed descriptive paragraph.`
+            Return a single detailed paragraph description.`
           },
         ],
       },
@@ -60,46 +61,52 @@ async function analyzeImageVisuals(base64Image: string, mimeType: string): Promi
         safetySettings: safetySettings,
       }
     });
-    return response.text || "No description generated.";
+
+    if (!response.text) {
+      throw new Error("Visual analysis returned empty response. The image might be unclear or blocked.");
+    }
+
+    return response.text;
   } catch (error: any) {
-    console.error("Visual analysis failed:", error);
-    throw new Error(`Visual analysis failed: ${error.message || error}`);
+    console.error("Visual analysis error:", error);
+    throw new Error(`Visual Analysis Failed: ${error.message || error}`);
   }
 }
 
 /**
- * Step 2: Use the description + Google Search to find market data and history.
- * Uses gemini-2.0-flash-exp with Search Grounding.
+ * Step 2: Identify and Value the stamp using Search Grounding.
  */
 async function identifyAndValueStamp(visualDescription: string): Promise<StampData> {
   try {
+    console.log("Starting Identification...");
+
     const prompt = `
-    I have a stamp with the following visual description:
+    I have a stamp with this visual description:
     "${visualDescription}"
 
-    Your task is to identify this stamp, value it, and provide historical context acting as a "GlobalStamp Collector AI".
+    Act as the "GlobalStamp Collector AI". Identify this stamp, value it, and provide historical context.
     
-    **Sources:** YOU MUST cross-reference data from reputable authorities like Scott, Michel, Stanley Gibbons, Yvert et Tellier, and Colnect via Google Search. Do not rely on Etsy/eBay listings for identification, only for rough market sentiment if catalogs are unavailable.
+    **CRITICAL INSTRUCTIONS:**
+    1. You MUST search Google for this stamp using catalogs like Scott, Michel, or Colnect.
+    2. Output MUST be valid JSON.
+    3. Language: Turkish (Türkçe).
 
-    **Output Language:** Turkish (Türkçe).
-
-    **Required Fields in JSON Format:**
-    1. "title": Name of the stamp.
-    2. "country": Country name (in Turkish).
-    3. "year": Year of issue.
-    4. "rarity": Must be one of ["Nadir", "Az Bulunur", "Yaygın"].
-    5. "valueUsd": Estimated price range in USD (e.g., "$10 - $50"). Add a note if condition heavily affects this.
-    6. "description": A strictly limited description of maximum 4 sentences explaining the stamp's origin, the figure/event depicted, and why it is significant.
-    7. "catalogRef": Likely catalog number (e.g., Scott #123).
-    8. "conditionNote": A brief note on how condition (mint/used) affects this specific stamp's value based on the visual description provided.
-    9. "rarityReason": Identify if there is a SPECIAL reason for rarity. Examples: "Geri çekildi" (Withdrawn), "Tedavüle çıkmadı" (Never issued), "Hatalı Basım" (Error), "Sürşarj Hatası" (Overprint error). If it is a standard stamp, return null.
-
-    Output ONLY raw JSON.
+    **JSON Structure:**
+    {
+      "title": "Stamp Name",
+      "country": "Country Name (Turkish)",
+      "year": "Year",
+      "rarity": "Nadir" | "Az Bulunur" | "Yaygın",
+      "valueUsd": "$Price Range",
+      "description": "Historical description (max 4 sentences)",
+      "catalogRef": "Scott #123 or similar",
+      "conditionNote": "Condition impact note",
+      "rarityReason": "Reason if special (e.g. 'Hatalı Basım'), else null"
+    }
     `;
 
-    // Note: Grounding tools prevent usage of responseSchema. We must parse the text manually.
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-3-pro-preview',
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -107,18 +114,31 @@ async function identifyAndValueStamp(visualDescription: string): Promise<StampDa
       },
     });
 
-    const rawText = response.text || "{}";
-    const jsonString = cleanJsonString(rawText);
+    if (!response.text) {
+      throw new Error("Identification returned empty response.");
+    }
+
+    const jsonString = cleanJsonString(response.text);
     let parsed: any = {};
     
     try {
       parsed = JSON.parse(jsonString);
     } catch (e) {
-      console.error("Failed to parse JSON from search result", rawText);
-      throw new Error("AI response was not in valid JSON format.");
+      console.error("JSON Parse Error. Raw text:", response.text);
+      // Attempt to find JSON object if mixed with text
+      const jsonMatch = response.text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          parsed = JSON.parse(jsonMatch[0]);
+        } catch (e2) {
+          throw new Error("Failed to parse AI response as JSON.");
+        }
+      } else {
+        throw new Error("AI response did not contain valid JSON.");
+      }
     }
 
-    // Extract grounding URLs
+    // Extract grounding URLs (Source links)
     const groundingUrls: string[] = [];
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     chunks.forEach((chunk: any) => {
@@ -137,31 +157,33 @@ async function identifyAndValueStamp(visualDescription: string): Promise<StampDa
       catalogRef: parsed.catalogRef || "Katalog bilgisi yok",
       conditionNote: parsed.conditionNote,
       rarityReason: parsed.rarityReason,
-      groundingUrls: Array.from(new Set(groundingUrls)), // deduplicate
+      groundingUrls: Array.from(new Set(groundingUrls)),
     };
 
   } catch (error: any) {
-    console.error("Identification failed:", error);
-    throw new Error(`Identification failed: ${error.message || error}`);
+    console.error("Identification error:", error);
+    throw new Error(`Identification Failed: ${error.message || error}`);
   }
 }
 
 export async function processStampImage(file: File): Promise<StampData> {
-  // Convert file to base64
+  // 1. Convert Image to Base64
   const base64Data = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
-      const base64String = (reader.result as string).split(',')[1];
-      resolve(base64String);
+      const result = reader.result as string;
+      // Remove the data URL prefix (e.g. "data:image/jpeg;base64,")
+      const base64 = result.split(',')[1];
+      resolve(base64);
     };
-    reader.onerror = reject;
+    reader.onerror = (err) => reject(new Error("Failed to read image file"));
     reader.readAsDataURL(file);
   });
 
-  // Step 1: Vision Analysis
+  // 2. Analyze Visuals
   const description = await analyzeImageVisuals(base64Data, file.type);
   
-  // Step 2: Search & Valuation
+  // 3. Identify & Value
   const result = await identifyAndValueStamp(description);
 
   return result;
