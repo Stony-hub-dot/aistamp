@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { StampData, Rarity } from "../types";
 
 // The API key is injected by Vite's define plugin at build time.
@@ -16,14 +16,23 @@ function cleanJsonString(text: string): string {
   return text;
 }
 
+// Safety settings to allow historical stamps (wars, flags, leaders, etc.)
+// We use 'BLOCK_NONE' to prevent the AI from refusing to analyze valid philatelic items.
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
+
 /**
- * Step 1: Analyze the image visually using gemini-3-pro-preview
+ * Step 1: Analyze the image visually using gemini-2.0-flash-exp
  * This gets the fine details: perforation, cancellation, design details.
  */
 async function analyzeImageVisuals(base64Image: string, mimeType: string): Promise<string> {
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-2.0-flash-exp',
       contents: {
         parts: [
           {
@@ -47,17 +56,20 @@ async function analyzeImageVisuals(base64Image: string, mimeType: string): Promi
           },
         ],
       },
+      config: {
+        safetySettings: safetySettings,
+      }
     });
     return response.text || "No description generated.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Visual analysis failed:", error);
-    throw new Error("Could not analyze the image visuals.");
+    throw new Error(`Visual analysis failed: ${error.message || error}`);
   }
 }
 
 /**
  * Step 2: Use the description + Google Search to find market data and history.
- * Uses gemini-2.5-flash with Search Grounding.
+ * Uses gemini-2.0-flash-exp with Search Grounding.
  */
 async function identifyAndValueStamp(visualDescription: string): Promise<StampData> {
   try {
@@ -87,10 +99,11 @@ async function identifyAndValueStamp(visualDescription: string): Promise<StampDa
 
     // Note: Grounding tools prevent usage of responseSchema. We must parse the text manually.
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash-exp',
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
+        safetySettings: safetySettings,
       },
     });
 
@@ -127,9 +140,9 @@ async function identifyAndValueStamp(visualDescription: string): Promise<StampDa
       groundingUrls: Array.from(new Set(groundingUrls)), // deduplicate
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Identification failed:", error);
-    throw new Error("Could not identify stamp data from catalogs.");
+    throw new Error(`Identification failed: ${error.message || error}`);
   }
 }
 
