@@ -15,7 +15,7 @@ function cleanJsonString(text: string): string {
   return clean.trim();
 }
 
-// Safety settings using Enums to satisfy TypeScript requirements
+// Safety settings using Enums to ensure type safety
 // We allow all content to ensure historical stamps (war themes, etc.) are not blocked
 const safetySettings = [
   { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -26,14 +26,14 @@ const safetySettings = [
 
 /**
  * Step 1: Analyze the image visually.
- * We use gemini-3-pro-preview for high-fidelity image understanding.
+ * We use gemini-2.5-flash for fast and accurate multimodal analysis.
  */
 async function analyzeImageVisuals(base64Image: string, mimeType: string): Promise<string> {
   try {
     console.log("Starting Visual Analysis...");
     
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [
           {
@@ -106,7 +106,7 @@ async function identifyAndValueStamp(visualDescription: string): Promise<StampDa
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
