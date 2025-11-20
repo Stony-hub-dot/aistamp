@@ -4,11 +4,11 @@ import react from '@vitejs/plugin-react';
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
+  // Casting process to any avoids type errors during the build
   const env = loadEnv(mode, (process as any).cwd(), '');
 
   return {
     plugins: [react()],
-    // This is critical: it replaces process.env.API_KEY in your code with the actual value during build
     define: {
       'process.env.API_KEY': JSON.stringify(env.API_KEY || ''),
     },
