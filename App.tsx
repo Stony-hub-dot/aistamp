@@ -73,12 +73,13 @@ const App: React.FC = () => {
         data: result
       }));
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       setState(prev => ({
         ...prev,
         status: 'error',
-        error: "Pul tanımlanamadı veya bir hata oluştu. Lütfen daha net bir fotoğraf deneyin."
+        // Display the actual error message from the service
+        error: error.message || "Pul tanımlanamadı veya bir hata oluştu. Lütfen daha net bir fotoğraf deneyin."
       }));
     }
   };
@@ -170,7 +171,10 @@ const App: React.FC = () => {
             {/* Error State */}
             {state.status === 'error' && (
               <div className="max-w-xl mx-auto bg-red-50 border border-red-100 rounded-2xl p-6 text-center">
-                <p className="text-red-600 font-medium mb-4">{state.error}</p>
+                <div className="text-red-600 font-medium mb-4">
+                  <span className="block text-lg font-bold mb-2">Hata Oluştu</span>
+                  {state.error}
+                </div>
                 <button 
                   onClick={reset}
                   className="bg-white border border-red-200 text-red-600 px-6 py-2 rounded-full font-medium hover:bg-red-50 transition-colors"
